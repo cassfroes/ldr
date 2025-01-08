@@ -1,7 +1,7 @@
 /*
   Lode Runner
   por Cassiano Lustosa Froes
-  em janeiro/94
+  em janeiro/94  
 */
 
 #include "graphics.h"
@@ -75,7 +75,7 @@ int horiz,vert,indice;
 	line(horiz+9,vert,horiz+9,vert+12); /*corpo*/
 	line(horiz+10,vert,horiz+10,vert+12); /*corpo*/
 
-	line(horiz+8,vert+1,horiz+8,vert+3);    /*cabe‡a*/
+	line(horiz+8,vert+1,horiz+8,vert+3);    /*cabeâ€¡a*/
 	line(horiz+11,vert+1,horiz+11,vert+3);
 
 	line(horiz+11,vert+12,horiz+13,vert+12); /*perna dir*/
@@ -205,7 +205,7 @@ void libera_memoria()
 		free(ptraux);
 	}
 	while(ptrprimeiro!=NULL);
-}     /* libera mem¢ria */
+}     /* libera memÂ¢ria */
 
 void desenhafase()
 {
@@ -496,7 +496,7 @@ int posicao;
 
 
 
-/* verifica se h  buracos abertos */
+/* verifica se hÂ  buracos abertos */
 void buracos_abertos()
 {
 	int n;
