@@ -1,0 +1,4 @@
+html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#222;color:#ddd}
+#controls{padding:8px;background:#111;color:#ddd}
+#game{display:block;margin:8px auto;border:1px solid #666;background:#000;image-rendering:pixelated}
+#status{margin-left:12px;color:#9cf}
