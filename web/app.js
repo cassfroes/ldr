@@ -68,6 +68,7 @@ let player = {
 let enemies = [];
 let holes = [];
 let points = 0;
+let lives = 4;
 let pressedKeys = new Set();
 let levelBuffer = null;
 let currentLevelIndex = 0;
@@ -242,6 +243,51 @@ function render() {
   }
   enemies.forEach(drawEnemy);
   drawPlayer();
+  // Draw lives counter at bottom center: green label + rounded square icons
+  (function drawLives() {
+    const label = 'LIVES';
+    const iconSize = 14;
+    const gap = 6;
+    const y = ROWS * TILE_H + 16; // just above bottom of canvas
+
+    ctx.font = 'bold 16px "Press Start 2P", monospace';
+    ctx.textAlign = 'left';
+    const textWidth = ctx.measureText(label).width;
+    const totalWidth = textWidth + 8 + Math.max(0, (lives * (iconSize + gap)) - gap);
+    const startX = Math.round(canvas.width / 2 - totalWidth / 2);
+
+    // label in bright green
+    ctx.fillStyle = '#00FF00';
+    ctx.fillText(label, startX, y);
+
+    // helper: draw rounded rect
+    function roundedRect(x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    // draw life icons
+    let iconX = startX + textWidth + 8;
+    for (let i = 0; i < lives; i++) {
+      const ix = iconX + i * (iconSize + gap);
+      // green filled rounded square with thin dark border
+      roundedRect(ix, y - iconSize, iconSize, iconSize, 3);
+      ctx.fillStyle = '#00FF00';
+      ctx.fill();
+      ctx.strokeStyle = '#003300';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // inner small inset to give a rounded-square look
+      roundedRect(ix + 3, y - iconSize + 3, iconSize - 6, iconSize - 6, 2);
+      ctx.fillStyle = '#001100';
+      ctx.fill();
+    }
+  })();
   if (gameOver || levelCompleted || waitingForStart) {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -306,6 +352,17 @@ function setGameOver(message) {
   status.textContent = message;
 }
 
+function loseLife() {
+  if (lives <= 1) {
+    lives = 0;
+    setGameOver('Game Over - no lives left');
+    return;
+  }
+  lives -= 1;
+  status.textContent = `Life lost! ${lives} lives remaining`;
+  loadLevelByIndex(currentLevelIndex);
+}
+
 function restartLevel() {
   if (!levelBuffer) return;
   levelCompleted = false;
@@ -315,8 +372,9 @@ function restartLevel() {
 }
 
 function checkPlayerEnemyCollision() {
+  if (gameOver || waitingForStart) return;
   if (enemies.some(e => e.x === player.x && e.y === player.y)) {
-    setGameOver('Game Over - caught by enemy');
+    loseLife();
   }
 }
 
@@ -473,8 +531,16 @@ function updateHoles() {
     const hole = holes[i];
     hole.ticks -= 1;
     if (hole.ticks <= 0) {
-      const occupied = (player.x === hole.x && player.y === hole.y) || enemies.some(e => e.x === hole.x && e.y === hole.y);
-      if (!occupied && tiles[hole.x][hole.y] === TILE.HOLE) {
+      if (player.x === hole.x && player.y === hole.y) {
+        loseLife();
+        holes.splice(i, 1);
+        if (!gameOver) {
+          tiles[hole.x][hole.y] = TILE.TIJOLO;
+        }
+        continue;
+      }
+      const occupiedByEnemy = enemies.some(e => e.x === hole.x && e.y === hole.y);
+      if (!occupiedByEnemy && tiles[hole.x][hole.y] === TILE.HOLE) {
         tiles[hole.x][hole.y] = TILE.TIJOLO;
         holes.splice(i, 1);
       } else {
