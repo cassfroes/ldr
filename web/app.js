@@ -50,6 +50,7 @@ const status = document.getElementById('status');
 const GAME_TICK_MS = 1000 / 60;
 const MOVE_FRAMES = 8;
 const HOLE_TICKS = 240;
+const RESPAWN_BLINK_TICKS = 180;
 
 let lastTimestamp = 0;
 let accumulator = 0;
@@ -116,13 +117,47 @@ function isEnemyOn(x, y) {
 }
 
 function isStandingSupport(x, y) {
+  const current = tileAt(x, y);
   const below = tileAt(x, y + 1);
-  return below !== null && (
-    isSolidTile(below)
-    || below === TILE.ESCADAPASSAR
-    || isClimbableTile(below)
-    || (below === TILE.HOLE && isEnemyOn(x, y + 1))
-  );
+  if (below === null) return false;
+  if (isSolidTile(below)) return true;
+  if (below === TILE.HOLE && isEnemyOn(x, y + 1)) return true;
+  if (isClimbableTile(current)) return true;
+  return false;
+}
+
+function isFallThroughTile(t) {
+  return t === TILE.EMPTY
+    || t === TILE.BOLINHA
+    || t === TILE.ESCADAPASSAR
+    || t === TILE.TIJOLO_FALSO
+    || t === TILE.HOLE;
+}
+
+function findTopSpawnX(preferredX) {
+  if (isPassableTile(tileAt(preferredX, 0))) return preferredX;
+  for (let dx = 1; dx < COLUMNS; dx++) {
+    const left = preferredX - dx;
+    const right = preferredX + dx;
+    if (left >= 0 && isPassableTile(tileAt(left, 0))) return left;
+    if (right < COLUMNS && isPassableTile(tileAt(right, 0))) return right;
+  }
+  return 0;
+}
+
+function respawnEnemyAtTop(enemy) {
+  const spawnX = findTopSpawnX(enemy.x);
+  enemy.x = spawnX;
+  enemy.y = 0;
+  enemy.targetX = spawnX;
+  enemy.targetY = 0;
+  enemy.offsetX = 0;
+  enemy.offsetY = 0;
+  enemy.dirX = 0;
+  enemy.dirY = 0;
+  enemy.moving = false;
+  enemy.respawning = true;
+  enemy.blinkTicks = RESPAWN_BLINK_TICKS;
 }
 
 function canWalkTo(x, y) {
@@ -136,22 +171,23 @@ function canFallFrom(x, y) {
   if (current === TILE.HOLE && isEnemyOn(x, y)) return false;
   if (isStandingSupport(x, y)) return false;
   const below = tileAt(x, y + 1);
-  return below !== null && isPassableTile(below);
+  return below !== null && isFallThroughTile(below);
 }
 
-function canEntityMove(entity, dx, dy) {
-  const nx = entity.x + dx;
-  const ny = entity.y + dy;
-  const current = tileAt(entity.x, entity.y);
+function canEntityMoveCoords(x, y, dx, dy) {
+  const nx = x + dx;
+  const ny = y + dy;
+  const current = tileAt(x, y);
   const dest = tileAt(nx, ny);
   if (dest === null || !isPassableTile(dest)) return false;
-  const currentHoleBlocked = current === TILE.HOLE && isEnemyOn(entity.x, entity.y);
+  const currentHoleBlocked = current === TILE.HOLE && isEnemyOn(x, y);
   if (dx !== 0) {
     return isClimbableTile(current)
-      || isStandingSupport(entity.x, entity.y)
+      || isStandingSupport(x, y)
       || currentHoleBlocked
       || isClimbableTile(dest)
-      || (dest === TILE.HOLE && isEnemyOn(nx, ny));
+      || dest === TILE.HOLE
+      || (isFallThroughTile(current) && isPassableTile(dest));
   }
   if (dy < 0) {
     return isClimbableTile(current) || isClimbableTile(dest);
@@ -160,6 +196,10 @@ function canEntityMove(entity, dx, dy) {
     return isClimbableTile(current) || isClimbableTile(dest) || isStandingSupport(nx, ny) || currentHoleBlocked;
   }
   return true;
+}
+
+function canEntityMove(entity, dx, dy) {
+  return canEntityMoveCoords(entity.x, entity.y, dx, dy);
 }
 
 function drawTile(x, y, t) {
@@ -214,24 +254,104 @@ function drawTile(x, y, t) {
 function drawPlayer() {
   const sx = player.x * TILE_W + player.offsetX;
   const sy = player.y * TILE_H + player.offsetY;
-  ctx.fillStyle = player.frame % 16 < 8 ? '#ffffff' : '#ccf';
-  ctx.fillRect(sx + 4, sy + 2, TILE_W - 8, TILE_H - 4);
-  ctx.fillStyle = '#000';
-  ctx.fillRect(sx + 7, sy + 6, 2, 2);
-  ctx.fillRect(sx + 11, sy + 6, 2, 2);
-  ctx.beginPath();
-  ctx.arc(sx + 10, sy + 12, 2, 0, Math.PI * 2);
-  ctx.fill();
+  const moving = player.moving;
+  const pose = player.frame % 16 < 8;
+  const bodyColor = '#FFFFFF';
+  const accentColor = '#000000';
+
+  // head
+  ctx.fillStyle = bodyColor;
+  ctx.fillRect(sx + 7, sy + 2, 6, 6);
+  ctx.fillStyle = accentColor;
+  ctx.fillRect(sx + 9, sy + 4, 2, 1);
+  ctx.fillRect(sx + 11, sy + 4, 2, 1);
+
+  // torso
+  ctx.fillStyle = bodyColor;
+  ctx.fillRect(sx + 9, sy + 8, 2, 6);
+
+  // arms
+  if (moving && pose) {
+    ctx.fillRect(sx + 4, sy + 9, 4, 2);
+    ctx.fillRect(sx + 13, sy + 10, 4, 2);
+  } else if (moving) {
+    ctx.fillRect(sx + 4, sy + 10, 4, 2);
+    ctx.fillRect(sx + 13, sy + 9, 4, 2);
+  } else {
+    ctx.fillRect(sx + 4, sy + 10, 4, 2);
+    ctx.fillRect(sx + 13, sy + 10, 4, 2);
+  }
+
+  // legs
+  if (moving && pose) {
+    ctx.fillRect(sx + 5, sy + 14, 3, 5);
+    ctx.fillRect(sx + 12, sy + 15, 3, 4);
+    ctx.fillRect(sx + 4, sy + 18, 2, 2);
+    ctx.fillRect(sx + 14, sy + 17, 3, 2);
+  } else if (moving) {
+    ctx.fillRect(sx + 8, sy + 14, 3, 4);
+    ctx.fillRect(sx + 11, sy + 14, 3, 5);
+    ctx.fillRect(sx + 7, sy + 17, 3, 2);
+    ctx.fillRect(sx + 13, sy + 19, 2, 2);
+  } else {
+    ctx.fillRect(sx + 8, sy + 14, 2, 5);
+    ctx.fillRect(sx + 11, sy + 14, 2, 5);
+    ctx.fillRect(sx + 7, sy + 19, 2, 2);
+    ctx.fillRect(sx + 12, sy + 19, 2, 2);
+  }
 }
 
 function drawEnemy(enemy) {
   const sx = enemy.x * TILE_W + enemy.offsetX;
   const sy = enemy.y * TILE_H + enemy.offsetY;
-  ctx.fillStyle = enemy.frame % 20 < 10 ? '#ff6666' : '#ff3333';
-  ctx.fillRect(sx + 4, sy + 4, TILE_W - 8, TILE_H - 8);
-  ctx.fillStyle = '#000';
-  ctx.fillRect(sx + 6, sy + 7, 3, 3);
-  ctx.fillRect(sx + 13, sy + 7, 3, 3);
+  const blink = enemy.respawning && enemy.blinkTicks % 30 < 15;
+  const moving = enemy.moving;
+  const pose = enemy.frame % 16 < 8;
+  const bodyColor = blink ? '#000000' : '#FF3333';
+  const accentColor = '#000000';
+
+  // head
+  ctx.fillStyle = bodyColor;
+  ctx.fillRect(sx + 7, sy + 2, 6, 6);
+  if (!blink) {
+    ctx.fillStyle = accentColor;
+    ctx.fillRect(sx + 9, sy + 4, 2, 1);
+    ctx.fillRect(sx + 11, sy + 4, 2, 1);
+  }
+
+  // torso
+  ctx.fillStyle = bodyColor;
+  ctx.fillRect(sx + 9, sy + 8, 2, 6);
+
+  // arms
+  if (moving && pose) {
+    ctx.fillRect(sx + 4, sy + 9, 4, 2);
+    ctx.fillRect(sx + 13, sy + 10, 4, 2);
+  } else if (moving) {
+    ctx.fillRect(sx + 4, sy + 10, 4, 2);
+    ctx.fillRect(sx + 13, sy + 9, 4, 2);
+  } else {
+    ctx.fillRect(sx + 4, sy + 10, 4, 2);
+    ctx.fillRect(sx + 13, sy + 10, 4, 2);
+  }
+
+  // legs
+  if (moving && pose) {
+    ctx.fillRect(sx + 5, sy + 14, 3, 5);
+    ctx.fillRect(sx + 12, sy + 15, 3, 4);
+    ctx.fillRect(sx + 4, sy + 18, 2, 2);
+    ctx.fillRect(sx + 14, sy + 17, 3, 2);
+  } else if (moving) {
+    ctx.fillRect(sx + 8, sy + 14, 3, 4);
+    ctx.fillRect(sx + 11, sy + 14, 3, 5);
+    ctx.fillRect(sx + 7, sy + 17, 3, 2);
+    ctx.fillRect(sx + 13, sy + 19, 2, 2);
+  } else {
+    ctx.fillRect(sx + 8, sy + 14, 2, 5);
+    ctx.fillRect(sx + 11, sy + 14, 2, 5);
+    ctx.fillRect(sx + 7, sy + 19, 2, 2);
+    ctx.fillRect(sx + 12, sy + 19, 2, 2);
+  }
 }
 
 function render() {
@@ -423,11 +543,6 @@ function digHole(dx) {
 function updatePlayer() {
   player.frame += 1;
   if (!player.moving) {
-    if (canFallFrom(player.x, player.y)) {
-      console.log('player falling from', player.x, player.y);
-      startMove(player, 0, 1);
-      return;
-    }
     const nextKey = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].find(k => pressedKeys.has(k));
     if (nextKey) {
       const moveMap = {
@@ -442,7 +557,13 @@ function updatePlayer() {
       if (canMove) {
         console.log('player start move', dx, dy);
         startMove(player, dx, dy);
+        return;
       }
+    }
+    if (canFallFrom(player.x, player.y)) {
+      console.log('player falling from', player.x, player.y);
+      startMove(player, 0, 1);
+      return;
     }
     return;
   }
@@ -478,7 +599,7 @@ function getEnemyPathStep(enemy) {
     ];
 
     for (const { dx, dy } of candidates) {
-      if (!canEntityMove(pos, dx, dy)) continue;
+      if (!canEntityMoveCoords(pos.x, pos.y, dx, dy)) continue;
       const nx = pos.x + dx;
       const ny = pos.y + dy;
       if (nx < 0 || nx >= COLUMNS || ny < 0 || ny >= ROWS) continue;
@@ -499,6 +620,14 @@ function getEnemyPathStep(enemy) {
 
 function updateEnemy(enemy) {
   enemy.frame += 1;
+  if (enemy.respawning) {
+    if (enemy.blinkTicks > 0) {
+      enemy.blinkTicks -= 1;
+      return;
+    }
+    enemy.respawning = false;
+  }
+
   if (!enemy.moving) {
     if (canFallFrom(enemy.x, enemy.y)) {
       startMove(enemy, 0, 1);
@@ -507,16 +636,24 @@ function updateEnemy(enemy) {
     const step = getEnemyPathStep(enemy);
     if (step) {
       startMove(enemy, step.dx, step.dy);
-    } else {
-      const deltaX = Math.sign(player.x - enemy.x);
-      const deltaY = Math.sign(player.y - enemy.y);
-      if (deltaX !== 0 && canEntityMove(enemy, deltaX, 0)) {
-        startMove(enemy, deltaX, 0);
-      } else if (deltaY !== 0 && canEntityMove(enemy, 0, deltaY)) {
-        startMove(enemy, 0, deltaY);
-      }
+      return;
     }
-    return;
+
+    const deltaY = Math.sign(player.y - enemy.y);
+    const deltaX = Math.sign(player.x - enemy.x);
+
+    if (deltaX !== 0 && canEntityMove(enemy, deltaX, 0)) {
+      startMove(enemy, deltaX, 0);
+      return;
+    }
+    if (deltaY > 0 && canEntityMove(enemy, 0, 1)) {
+      startMove(enemy, 0, 1);
+      return;
+    }
+    if (deltaY < 0 && canEntityMove(enemy, 0, -1)) {
+      startMove(enemy, 0, -1);
+      return;
+    }
   }
 
   enemy.offsetX += enemy.dirX * TILE_W / MOVE_FRAMES;
@@ -531,21 +668,19 @@ function updateHoles() {
     const hole = holes[i];
     hole.ticks -= 1;
     if (hole.ticks <= 0) {
-      if (player.x === hole.x && player.y === hole.y) {
+      const playerInHole = player.x === hole.x && player.y === hole.y;
+      const enemyIndex = enemies.findIndex(e => e.x === hole.x && e.y === hole.y);
+      if (playerInHole) {
         loseLife();
-        holes.splice(i, 1);
-        if (!gameOver) {
-          tiles[hole.x][hole.y] = TILE.TIJOLO;
-        }
-        continue;
       }
-      const occupiedByEnemy = enemies.some(e => e.x === hole.x && e.y === hole.y);
-      if (!occupiedByEnemy && tiles[hole.x][hole.y] === TILE.HOLE) {
+      if (enemyIndex !== -1) {
+        const enemy = enemies[enemyIndex];
+        respawnEnemyAtTop(enemy);
+      }
+      if (!gameOver) {
         tiles[hole.x][hole.y] = TILE.TIJOLO;
-        holes.splice(i, 1);
-      } else {
-        hole.ticks = 10;
       }
+      holes.splice(i, 1);
     }
   }
 }
@@ -594,7 +729,7 @@ function initEntities() {
         tiles[x][y] = TILE.EMPTY;
       }
       if (t === TILE.INI) {
-        enemies.push({ x, y, targetX: x, targetY: y, offsetX: 0, offsetY: 0, moving: false, frame: 0, dirX: 0, dirY: 0 });
+        enemies.push({ x, y, targetX: x, targetY: y, offsetX: 0, offsetY: 0, moving: false, frame: 0, dirX: 0, dirY: 0, respawning: false, blinkTicks: 0 });
         tiles[x][y] = TILE.EMPTY;
       }
     }
