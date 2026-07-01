@@ -2,3 +2,21 @@ html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background
 #controls{padding:8px;background:#111;color:#ddd}
 #game{display:block;margin:8px auto;border:1px solid #666;background:#000;image-rendering:pixelated}
 #status{margin-left:12px;color:#9cf}
+
+#debugOverlay{
+	position:fixed;
+	right:12px;
+	top:12px;
+	background:rgba(0,0,0,0.6);
+	color:#9ff;
+	padding:8px 10px;
+	font-family:monospace;
+	font-size:12px;
+	border:1px solid rgba(150,200,255,0.12);
+	border-radius:6px;
+	z-index:9999;
+	max-width:240px;
+}
+
+.debugKey{color:#ffd480;font-weight:700}
+.debugVal{color:#9ff}

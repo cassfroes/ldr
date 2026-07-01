@@ -46,7 +46,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
 const fileInput = document.getElementById('fileInput');
 const status = document.getElementById('status');
+const testAudioBtn = document.getElementById('testAudio');
+if (testAudioBtn) testAudioBtn.addEventListener('click', (ev) => { ev.preventDefault(); playTestAudio(); });
+const debugOverlay = document.getElementById('debugOverlay');
 
+function updateDebugOverlay() {
+  if (!debugOverlay) return;
+  const audioSupported = !!(window.AudioContext || window.webkitAudioContext);
+  const audioExists = !!audioCtx;
+  const state = audioCtx ? audioCtx.state : 'none';
+  const gain = masterGain ? masterGain.gain.value.toFixed(2) : 'n/a';
+  const currentTime = audioCtx ? audioCtx.currentTime.toFixed(2) : 'n/a';
+  const info = [];
+  info.push(`<div><span class="debugKey">Audio:</span> <span class="debugVal">${audioSupported ? 'supported' : 'unsupported'}</span></div>`);
+  info.push(`<div><span class="debugKey">Ctx:</span> <span class="debugVal">${audioExists ? 'created' : 'not created'}</span></div>`);
+  info.push(`<div><span class="debugKey">State:</span> <span class="debugVal">${state}</span></div>`);
+  info.push(`<div><span class="debugKey">Gain:</span> <span class="debugVal">${gain}</span></div>`);
+  info.push(`<div><span class="debugKey">Version:</span> <span class="debugVal">${VERSION.toFixed(1)}</span></div>`);
+  info.push(`<div><span class="debugKey">Time:</span> <span class="debugVal">${currentTime}</span></div>`);
+  info.push(`<div><span class="debugKey">Enemies:</span> <span class="debugVal">${enemies.length}</span></div>`);
+  info.push(`<div><span class="debugKey">Holes:</span> <span class="debugVal">${holes.length}</span></div>`);
+  info.push(`<div><span class="debugKey">Level:</span> <span class="debugVal">${currentLevelIndex + 1}/${levelCount}</span></div>`);
+  debugOverlay.innerHTML = info.join('');
+}
+
+const VERSION = 0.1;
 const GAME_TICK_MS = 1000 / 60;
 const MOVE_FRAMES = 8;
 const HOLE_TICKS = 240;
@@ -78,6 +102,7 @@ let gameOver = false;
 let levelCompleted = false;
 let waitingForStart = false;
 let exitVisible = false;
+let deathEffectTicks = 0;
 
 function parseLevel(arrayBuffer, levelIndex = 0) {
   const bytes = new Uint8Array(arrayBuffer);
@@ -122,6 +147,7 @@ function isStandingSupport(x, y) {
   if (below === null) return false;
   if (isSolidTile(below)) return true;
   if (below === TILE.HOLE && isEnemyOn(x, y + 1)) return true;
+  if (below === TILE.ESCADA || below === TILE.ESCADAPASSAR) return true;
   if (isClimbableTile(current)) return true;
   return false;
 }
@@ -160,6 +186,87 @@ function respawnEnemyAtTop(enemy) {
   enemy.blinkTicks = RESPAWN_BLINK_TICKS;
 }
 
+// --- Audio (WebAudio) ---
+let audioCtx = null;
+let masterGain = null;
+
+function initAudio() {
+  if (audioCtx) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new Ctx();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.4;
+    masterGain.connect(audioCtx.destination);
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().then(() => {
+        console.log('audioCtx resumed');
+        status.textContent = 'Audio enabled';
+      }).catch(e => {
+        console.warn('audio resume failed', e);
+        status.textContent = 'Audio init failed';
+      });
+    } else {
+      status.textContent = 'Audio enabled';
+    }
+  } catch (e) {
+    console.warn('WebAudio not supported', e);
+    audioCtx = null;
+  }
+}
+
+function playTone(freq, type = 'square', duration = 0.12, vol = 0.6) {
+  if (!audioCtx) initAudio();
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, now);
+  g.gain.setValueAtTime(vol, now);
+  g.gain.exponentialRampToValueAtTime(0.001, now + duration);
+  o.connect(g);
+  g.connect(masterGain);
+  o.start(now);
+  o.stop(now + duration + 0.02);
+}
+
+function playDig() { playTone(120, 'sawtooth', 0.18, 0.6); }
+function playCollect() {
+  playTone(880, 'square', 0.06, 0.5);
+  setTimeout(() => playTone(1100, 'square', 0.06, 0.45), 90);
+}
+function playDeath() {
+  playTone(220, 'sine', 0.35, 0.7);
+  setTimeout(() => playTone(160, 'sine', 0.35, 0.6), 150);
+}
+function playLevelComplete() {
+  playTone(660, 'sawtooth', 0.12, 0.6);
+  setTimeout(() => playTone(880, 'sawtooth', 0.12, 0.6), 140);
+  setTimeout(() => playTone(1320, 'sawtooth', 0.24, 0.6), 300);
+}
+function playRespawnBeep() { playTone(440, 'square', 0.08, 0.35); }
+
+function playTestAudio() {
+  initAudio();
+  if (!audioCtx) return;
+  // ensure resumed before playing
+  const doPlay = () => {
+    playTone(880, 'square', 0.12, 0.6);
+    setTimeout(() => playTone(660, 'square', 0.12, 0.55), 140);
+    setTimeout(() => playTone(440, 'square', 0.18, 0.5), 300);
+    status.textContent = 'Played test audio';
+  };
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume().then(doPlay).catch(e => {
+      console.warn('resume failed', e);
+      status.textContent = 'Audio resume failed';
+    });
+  } else {
+    doPlay();
+  }
+}
+
 function canWalkTo(x, y) {
   const dest = tileAt(x, y);
   return dest !== null && isPassableTile(dest);
@@ -186,8 +293,7 @@ function canEntityMoveCoords(x, y, dx, dy) {
       || isStandingSupport(x, y)
       || currentHoleBlocked
       || isClimbableTile(dest)
-      || dest === TILE.HOLE
-      || (isFallThroughTile(current) && isPassableTile(dest));
+      || dest === TILE.HOLE;
   }
   if (dy < 0) {
     return isClimbableTile(current) || isClimbableTile(dest);
@@ -363,6 +469,11 @@ function render() {
   }
   enemies.forEach(drawEnemy);
   drawPlayer();
+  if (deathEffectTicks > 0) {
+    ctx.fillStyle = `rgba(255, 0, 0, ${Math.min(0.6, deathEffectTicks / 40 * 0.6)})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    deathEffectTicks -= 1;
+  }
   // Draw lives counter at bottom center: green label + rounded square icons
   (function drawLives() {
     const label = 'LIVES';
@@ -417,7 +528,7 @@ function render() {
     if (gameOver) {
       ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 10);
       ctx.font = '14px Arial';
-      ctx.fillText('Press R to retry', canvas.width / 2, canvas.height / 2 + 20);
+      ctx.fillText('Press any key to restart', canvas.width / 2, canvas.height / 2 + 20);
     } else if (levelCompleted) {
       ctx.fillText('Level Complete', canvas.width / 2, canvas.height / 2 - 10);
       ctx.font = '14px Arial';
@@ -433,6 +544,7 @@ function collectTile(x, y) {
     tiles[x][y] = TILE.EMPTY;
     points += 30;
     status.textContent = `Points: ${points}`;
+    playCollect();
     if (isLevelCleared()) {
       exitVisible = true;
       status.textContent = 'All balls collected! Blue ladders appear.';
@@ -440,12 +552,12 @@ function collectTile(x, y) {
   }
 }
 
-function loadLevelByIndex(index) {
+function loadLevelByIndex(index, autoStart = false) {
   if (!levelBuffer) return;
   if (index < 0 || index >= levelCount) return;
   currentLevelIndex = index;
   exitVisible = false;
-  waitingForStart = index > 0;
+  waitingForStart = index > 0 && !autoStart;
   levelCompleted = false;
   gameOver = false;
   parseLevel(levelBuffer, index);
@@ -469,18 +581,24 @@ function isLevelCleared() {
 
 function setGameOver(message) {
   gameOver = true;
-  status.textContent = message;
+  waitingForStart = true;
+  pressedKeys.clear();
+  deathEffectTicks = 40;
+  status.textContent = `${message} Press any key to restart`;
 }
 
 function loseLife() {
   if (lives <= 1) {
     lives = 0;
-    setGameOver('Game Over - no lives left');
+    setGameOver('Game Over - no lives left.');
+    playDeath();
     return;
   }
   lives -= 1;
   status.textContent = `Life lost! ${lives} lives remaining`;
-  loadLevelByIndex(currentLevelIndex);
+  deathEffectTicks = 20;
+  playDeath();
+  loadLevelByIndex(currentLevelIndex, true);
 }
 
 function restartLevel() {
@@ -488,7 +606,18 @@ function restartLevel() {
   levelCompleted = false;
   waitingForStart = false;
   gameOver = false;
-  loadLevelByIndex(currentLevelIndex);
+  loadLevelByIndex(currentLevelIndex, true);
+}
+
+function restartGameAfterGameOver() {
+  if (!levelBuffer) return;
+  pressedKeys.clear();
+  lives = 4;
+  levelCompleted = false;
+  gameOver = false;
+  waitingForStart = false;
+  status.textContent = 'Restarting game...';
+  loadLevelByIndex(0, true);
 }
 
 function checkPlayerEnemyCollision() {
@@ -506,6 +635,7 @@ function checkLevelComplete() {
       levelCompleted = true;
       waitingForStart = true;
       status.textContent = 'All levels complete! Press any key to restart';
+      playLevelComplete();
     }
   }
 }
@@ -535,6 +665,7 @@ function digHole(dx) {
     tiles[hx][hy] = TILE.HOLE;
     holes.push({ x: hx, y: hy, ticks: HOLE_TICKS });
     status.textContent = 'Hole dug';
+    playDig();
   } else {
     status.textContent = 'Cannot dig here';
   }
@@ -622,6 +753,7 @@ function updateEnemy(enemy) {
   enemy.frame += 1;
   if (enemy.respawning) {
     if (enemy.blinkTicks > 0) {
+      if (enemy.blinkTicks % 30 === 0) playRespawnBeep();
       enemy.blinkTicks -= 1;
       return;
     }
@@ -704,6 +836,7 @@ function gameLoop(timestamp) {
     accumulator -= GAME_TICK_MS;
   }
   render();
+  updateDebugOverlay();
   requestAnimationFrame(gameLoop);
 }
 
@@ -753,17 +886,22 @@ function startGame() {
 }
 
 window.addEventListener('keydown', (ev) => {
+  initAudio();
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'z', 'Z', 'x', 'X', '+', '=', '-', 'r', 'R'].includes(ev.key)) {
     ev.preventDefault();
   }
-  pressedKeys.add(ev.key);
   console.log('keydown', ev.key);
-  if (waitingForStart && !gameOver) {
+  if (waitingForStart) {
+    if (gameOver) {
+      restartGameAfterGameOver();
+      return;
+    }
     waitingForStart = false;
-    status.textContent = `Game started`; 
+    status.textContent = `Game started`;
     startGame();
     return;
   }
+  pressedKeys.add(ev.key);
   status.textContent = `Key pressed: ${ev.key}`;
   switch (ev.key) {
     case 'z':
